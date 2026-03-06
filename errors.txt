@@ -1,0 +1,53 @@
+{
+  "colorSpace": "RGB",
+  "hasIccProfile": true,
+  "dpiY": null,
+  "dpiX": null,
+  "widthPx": 169,
+  "heightPx": 220,
+  "bitDepth": 8,
+  "format": "jpeg",
+  "hasAlpha": false
+}
+[
+  {
+    "severity": "FAIL",
+    "actual": "image/png",
+    "code": "ALLOWED_MIME_TYPE",
+    "passed": true,
+    "message": "File MIME type must be allowed",
+    "expected": "image/jpeg,image/png,image/tiff,application/pdf"
+  },
+  {
+    "severity": "FAIL",
+    "actual": 19284,
+    "code": "MAX_FILE_SIZE",
+    "passed": true,
+    "message": "File size must be <= 26214400 bytes",
+    "expected": 26214400
+  },
+  {
+    "severity": "FAIL",
+    "actual": 169,
+    "code": "MIN_WIDTH",
+    "passed": false,
+    "message": "Image width must be >= 2000px",
+    "expected": 2000
+  },
+  {
+    "severity": "FAIL",
+    "actual": 220,
+    "code": "MIN_HEIGHT",
+    "passed": false,
+    "message": "Image height must be >= 2000px",
+    "expected": 2000
+  },
+  {
+    "severity": "FAIL",
+    "actual": null,
+    "code": "MIN_DPI",
+    "passed": false,
+    "message": "DPI metadata is missing; cannot validate minimum DPI",
+    "expected": 300
+  }
+]

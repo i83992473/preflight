@@ -1,0 +1,11 @@
+node_modules/
+cdk.out/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+*.tsbuildinfo
+
+.DS_Store
+Thumbs.db
