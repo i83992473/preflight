@@ -38,6 +38,7 @@ new PreflightApiStack(app, `PreflightApi-${environment}`, {
   uploadsApprovedBucket: storage.uploadsApprovedBucket,
   uploadsQuarantineBucket: storage.uploadsQuarantineBucket,
   jobsTable: storage.jobsTable,
+  rulesTable: storage.rulesTable,
   jobsQueue: storage.jobsQueue,
 });
 

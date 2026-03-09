@@ -16,6 +16,7 @@ export interface PreflightApiStackProps extends cdk.StackProps {
   uploadsApprovedBucket: s3.IBucket;
   uploadsQuarantineBucket: s3.IBucket;
   jobsTable: dynamodb.ITable;
+  rulesTable: dynamodb.ITable;
   jobsQueue: sqs.IQueue;
   preflightRules?: Partial<PreflightRules>;
 }
@@ -59,6 +60,7 @@ export class PreflightApiStack extends cdk.Stack {
       uploadsApprovedBucket: props.uploadsApprovedBucket,
       uploadsQuarantineBucket: props.uploadsQuarantineBucket,
       jobsTable: props.jobsTable,
+      rulesTable: props.rulesTable,
       jobsQueue: props.jobsQueue,
       preflightRules: props.preflightRules,
     });
@@ -69,6 +71,8 @@ export class PreflightApiStack extends cdk.Stack {
       presignFunction: lambdas.presignFunction,
       createJobFunction: lambdas.createJobFunction,
       getJobFunction: lambdas.getJobFunction,
+      getRulesFunction: lambdas.getRulesFunction,
+      updateRulesFunction: lambdas.updateRulesFunction,
     });
 
     new cdk.CfnOutput(this, "PreflightApiUrl", {

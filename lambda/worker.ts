@@ -10,7 +10,13 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { PDFDocument } from "pdf-lib";
 import { Readable } from "stream";
-import type { ImageMetadata, PreflightCheckResult, PreflightRules } from "../lib/contracts";
+import type {
+  ImageMetadata,
+  PreflightCheckResult,
+  PreflightRules,
+  RuleSeverity,
+} from "../lib/contracts";
+import { DEFAULT_PREFLIGHT_RULES, normalizePreflightRules } from "../lib/preflight-rules";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: {
@@ -18,22 +24,13 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   },
 });
 const s3 = new S3Client({});
-const DEFAULT_RULES: PreflightRules = {
-  allowedMimeTypes: ["image/jpeg", "image/png", "image/tiff", "application/pdf"],
-  maxFileSizeBytes: 26_214_400,
-  minWidthPx: 2000,
-  minHeightPx: 2000,
-  minDpi: 300,
-  targetPrintWidthIn: 8.5,
-  targetPrintHeightIn: 11,
-};
 
 export const handler = async (event: SQSEvent): Promise<void> => {
   const tableName = process.env.JOBS_TABLE_NAME;
   const tempBucket = process.env.UPLOADS_TEMP_BUCKET;
   const approvedBucket = process.env.UPLOADS_APPROVED_BUCKET;
   const quarantineBucket = process.env.UPLOADS_QUARANTINE_BUCKET;
-  const rules = parseRules(process.env.PREFLIGHT_RULES_JSON);
+  const rules = await loadActiveRules();
   const pdfDeepMode = process.env.PDF_DEEP_MODE === "true";
 
   if (!tableName || !tempBucket || !approvedBucket || !quarantineBucket) {
@@ -163,18 +160,45 @@ async function markStatus(
   );
 }
 
-function parseRules(rawRules: string | undefined): PreflightRules {
-  if (!rawRules) {
-    return DEFAULT_RULES;
+async function loadActiveRules(): Promise<PreflightRules> {
+  const rulesTableName = process.env.RULES_TABLE_NAME;
+  const rulesPartitionKey = process.env.RULES_PK ?? "RULES";
+  const rulesSortKey = process.env.RULES_SK ?? "ACTIVE";
+
+  if (!rulesTableName) {
+    return parseFallbackRules(process.env.PREFLIGHT_RULES_JSON);
   }
 
   try {
-    return {
-      ...DEFAULT_RULES,
-      ...(JSON.parse(rawRules) as Partial<PreflightRules>),
-    };
+    const response = await ddb.send(
+      new GetCommand({
+        TableName: rulesTableName,
+        Key: {
+          PK: rulesPartitionKey,
+          SK: rulesSortKey,
+        },
+      }),
+    );
+
+    if (response.Item?.rules) {
+      return normalizePreflightRules(response.Item.rules);
+    }
   } catch {
-    return DEFAULT_RULES;
+    // Fall back to Lambda environment defaults when rules-table fetch fails.
+  }
+
+  return parseFallbackRules(process.env.PREFLIGHT_RULES_JSON);
+}
+
+function parseFallbackRules(rawRules: string | undefined): PreflightRules {
+  if (!rawRules) {
+    return DEFAULT_PREFLIGHT_RULES;
+  }
+
+  try {
+    return normalizePreflightRules(JSON.parse(rawRules) as unknown);
+  } catch {
+    return DEFAULT_PREFLIGHT_RULES;
   }
 }
 
@@ -190,7 +214,7 @@ function buildChecks(input: {
 
   checks.push({
     code: "ALLOWED_MIME_TYPE",
-    severity: "FAIL",
+    severity: input.rules.mimeTypeSeverity,
     passed: input.rules.allowedMimeTypes.includes(effectiveMimeType),
     message: "File MIME type must be allowed",
     actual:
@@ -203,7 +227,7 @@ function buildChecks(input: {
   if (detectedMimeType != null && detectedMimeType !== input.mimeType) {
     checks.push({
       code: "DECLARED_MIME_MATCHES_CONTENT",
-      severity: "FAIL",
+      severity: input.rules.mimeMatchSeverity,
       passed: false,
       message: "Uploaded MIME type must match file content signature",
       actual: `${input.mimeType} (uploaded), ${detectedMimeType} (detected)`,
@@ -211,14 +235,17 @@ function buildChecks(input: {
     });
   }
 
-  checks.push({
-    code: "MAX_FILE_SIZE",
-    severity: "FAIL",
-    passed: input.fileSizeBytes <= input.rules.maxFileSizeBytes,
-    message: `File size must be <= ${input.rules.maxFileSizeBytes} bytes`,
-    actual: input.fileSizeBytes,
-    expected: input.rules.maxFileSizeBytes,
-  });
+  checks.push(
+    buildRangeCheck({
+      code: "FILE_SIZE_RANGE",
+      value: input.fileSizeBytes,
+      unitLabel: "bytes",
+      min: input.rules.minFileSizeBytes,
+      max: input.rules.maxFileSizeBytes,
+      severity: input.rules.fileSizeSeverity,
+      missingValueMessage: "File size is unavailable",
+    }),
+  );
 
   if (effectiveMimeType === "application/pdf") {
     checks.push({
@@ -280,7 +307,7 @@ function buildChecks(input: {
       );
       checks.push({
         code: "PDF_PAGE_SIZE_FOR_TARGET_PRINT",
-        severity: fitsTargetPrintSize == null ? "WARN" : "FAIL",
+        severity: fitsTargetPrintSize == null ? "WARN" : input.rules.pdfPageSizeSeverity,
         passed: fitsTargetPrintSize ?? false,
         message:
           fitsTargetPrintSize == null
@@ -297,23 +324,29 @@ function buildChecks(input: {
     return checks;
   }
 
-  checks.push({
-    code: "MIN_WIDTH",
-    severity: "FAIL",
-    passed: (input.metadata.widthPx ?? 0) >= input.rules.minWidthPx,
-    message: `Image width must be >= ${input.rules.minWidthPx}px`,
-    actual: input.metadata.widthPx ?? null,
-    expected: input.rules.minWidthPx,
-  });
+  checks.push(
+    buildRangeCheck({
+      code: "WIDTH_RANGE",
+      value: input.metadata.widthPx ?? null,
+      unitLabel: "px",
+      min: input.rules.minWidthPx,
+      max: input.rules.maxWidthPx,
+      severity: input.rules.widthSeverity,
+      missingValueMessage: "Image width metadata is unavailable",
+    }),
+  );
 
-  checks.push({
-    code: "MIN_HEIGHT",
-    severity: "FAIL",
-    passed: (input.metadata.heightPx ?? 0) >= input.rules.minHeightPx,
-    message: `Image height must be >= ${input.rules.minHeightPx}px`,
-    actual: input.metadata.heightPx ?? null,
-    expected: input.rules.minHeightPx,
-  });
+  checks.push(
+    buildRangeCheck({
+      code: "HEIGHT_RANGE",
+      value: input.metadata.heightPx ?? null,
+      unitLabel: "px",
+      min: input.rules.minHeightPx,
+      max: input.rules.maxHeightPx,
+      severity: input.rules.heightSeverity,
+      missingValueMessage: "Image height metadata is unavailable",
+    }),
+  );
 
   const targetPrintSize = getTargetPrintSize(input.rules);
   if (targetPrintSize) {
@@ -323,33 +356,73 @@ function buildChecks(input: {
       targetPrintSize.targetWidthIn,
       targetPrintSize.targetHeightIn,
     );
-    checks.push({
-      code: "MIN_DPI_AT_TARGET_PRINT_SIZE",
-      severity: targetPrintDpi == null ? "WARN" : "FAIL",
-      passed: targetPrintDpi == null ? false : targetPrintDpi >= input.rules.minDpi,
-      message:
-        targetPrintDpi == null
-          ? "Pixel dimensions are missing; cannot estimate DPI at target print size"
-          : `Estimated DPI at ${targetPrintSize.targetWidthIn}x${targetPrintSize.targetHeightIn}in must be >= ${input.rules.minDpi}`,
-      actual: targetPrintDpi == null ? null : round2(targetPrintDpi),
-      expected: input.rules.minDpi,
-    });
+    checks.push(
+      buildRangeCheck({
+        code: "TARGET_PRINT_DPI_RANGE",
+        value: targetPrintDpi == null ? null : round2(targetPrintDpi),
+        unitLabel: "dpi",
+        min: input.rules.minTargetPrintDpi,
+        max: input.rules.maxTargetPrintDpi,
+        severity: input.rules.targetPrintDpiSeverity,
+        missingValueMessage: "Pixel dimensions are missing; cannot estimate DPI at target print size",
+      }),
+    );
   }
 
   const effectiveDpi = getEffectiveDpi(input.metadata);
-  checks.push({
-    code: "MIN_DPI",
-    severity: effectiveDpi === null ? "WARN" : "FAIL",
-    passed: effectiveDpi === null ? false : effectiveDpi >= input.rules.minDpi,
-    message:
-      effectiveDpi === null
-        ? "DPI metadata is missing; minimum DPI check is advisory"
-        : `Effective DPI must be >= ${input.rules.minDpi}`,
-    actual: effectiveDpi,
-    expected: input.rules.minDpi,
-  });
+  checks.push(
+    buildRangeCheck({
+      code: "DPI_METADATA_RANGE",
+      value: effectiveDpi,
+      unitLabel: "dpi",
+      min: input.rules.minDpi,
+      max: input.rules.maxDpi,
+      severity: input.rules.dpiSeverity,
+      missingValueMessage: "DPI metadata is missing; metadata DPI check is advisory",
+    }),
+  );
 
   return checks;
+}
+
+function buildRangeCheck(input: {
+  code: string;
+  value: number | null;
+  min: number;
+  max: number | null;
+  severity: RuleSeverity;
+  missingValueMessage: string;
+  unitLabel: string;
+}): PreflightCheckResult {
+  if (input.value == null) {
+    return {
+      code: input.code,
+      severity: "WARN",
+      passed: false,
+      message: input.missingValueMessage,
+      actual: null,
+      expected: buildRangeExpectedLabel(input.min, input.max, input.unitLabel),
+    };
+  }
+
+  const passedMin = input.value >= input.min;
+  const passedMax = input.max == null ? true : input.value <= input.max;
+  return {
+    code: input.code,
+    severity: input.severity,
+    passed: passedMin && passedMax,
+    message: `Value must be in range ${buildRangeExpectedLabel(input.min, input.max, input.unitLabel)}`,
+    actual: input.value,
+    expected: buildRangeExpectedLabel(input.min, input.max, input.unitLabel),
+  };
+}
+
+function buildRangeExpectedLabel(min: number, max: number | null, unitLabel: string): string {
+  if (max == null) {
+    return `>= ${min} ${unitLabel}`;
+  }
+
+  return `${min} - ${max} ${unitLabel}`;
 }
 
 function buildSummary(checks: PreflightCheckResult[]): {

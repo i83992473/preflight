@@ -17,8 +17,99 @@ type JobResponse = {
   errorMessage?: string;
 };
 
+type RuleSeverity = "FAIL" | "WARN";
+
+type PreflightRules = {
+  allowedMimeTypes: string[];
+  minFileSizeBytes: number;
+  maxFileSizeBytes: number | null;
+  fileSizeSeverity: RuleSeverity;
+  minWidthPx: number;
+  maxWidthPx: number | null;
+  widthSeverity: RuleSeverity;
+  minHeightPx: number;
+  maxHeightPx: number | null;
+  heightSeverity: RuleSeverity;
+  minDpi: number;
+  maxDpi: number | null;
+  dpiSeverity: RuleSeverity;
+  minTargetPrintDpi: number;
+  maxTargetPrintDpi: number | null;
+  targetPrintDpiSeverity: RuleSeverity;
+  targetPrintWidthIn: number | null;
+  targetPrintHeightIn: number | null;
+  pdfPageSizeSeverity: RuleSeverity;
+  mimeTypeSeverity: RuleSeverity;
+  mimeMatchSeverity: RuleSeverity;
+};
+
+type RulesResponse = {
+  rules: PreflightRules;
+  updatedAt: string | null;
+};
+
 const TERMINAL_STATES = new Set(["PASSED", "FAILED", "ERROR"]);
 const API_BASE_URL_STORAGE_KEY = "preflight.apiBaseUrl";
+const VIEW_STORAGE_KEY = "preflight.activeView";
+
+const RULE_FIELD_ROWS: Array<{
+  label: string;
+  minKey:
+    | "minFileSizeBytes"
+    | "minWidthPx"
+    | "minHeightPx"
+    | "minDpi"
+    | "minTargetPrintDpi";
+  maxKey:
+    | "maxFileSizeBytes"
+    | "maxWidthPx"
+    | "maxHeightPx"
+    | "maxDpi"
+    | "maxTargetPrintDpi";
+  severityKey:
+    | "fileSizeSeverity"
+    | "widthSeverity"
+    | "heightSeverity"
+    | "dpiSeverity"
+    | "targetPrintDpiSeverity";
+  unit: string;
+}> = [
+  {
+    label: "File Size",
+    minKey: "minFileSizeBytes",
+    maxKey: "maxFileSizeBytes",
+    severityKey: "fileSizeSeverity",
+    unit: "bytes",
+  },
+  {
+    label: "Image Width",
+    minKey: "minWidthPx",
+    maxKey: "maxWidthPx",
+    severityKey: "widthSeverity",
+    unit: "px",
+  },
+  {
+    label: "Image Height",
+    minKey: "minHeightPx",
+    maxKey: "maxHeightPx",
+    severityKey: "heightSeverity",
+    unit: "px",
+  },
+  {
+    label: "Metadata DPI",
+    minKey: "minDpi",
+    maxKey: "maxDpi",
+    severityKey: "dpiSeverity",
+    unit: "dpi",
+  },
+  {
+    label: "Target Print DPI",
+    minKey: "minTargetPrintDpi",
+    maxKey: "maxTargetPrintDpi",
+    severityKey: "targetPrintDpiSeverity",
+    unit: "dpi",
+  },
+];
 
 export function App(): JSX.Element {
   const [apiBaseUrl, setApiBaseUrl] = useState(() => {
@@ -30,11 +121,20 @@ export function App(): JSX.Element {
     return import.meta.env.VITE_API_BASE_URL ?? "";
   });
   const [idToken, setIdToken] = useState("");
+  const [activeView, setActiveView] = useState<"upload" | "rules">(() => {
+    const storedView = window.localStorage.getItem(VIEW_STORAGE_KEY);
+    return storedView === "rules" ? "rules" : "upload";
+  });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [result, setResult] = useState<JobResponse | null>(null);
   const [jobId, setJobId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [rules, setRules] = useState<PreflightRules | null>(null);
+  const [rulesUpdatedAt, setRulesUpdatedAt] = useState<string | null>(null);
+  const [rulesError, setRulesError] = useState("");
+  const [isLoadingRules, setIsLoadingRules] = useState(false);
+  const [isSavingRules, setIsSavingRules] = useState(false);
 
   const ready = useMemo(
     () => Boolean(apiBaseUrl.trim() && idToken.trim() && selectedFile),
@@ -50,6 +150,26 @@ export function App(): JSX.Element {
     window.localStorage.setItem(API_BASE_URL_STORAGE_KEY, apiBaseUrl);
   }, [apiBaseUrl]);
 
+  useEffect(() => {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, activeView);
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "rules") {
+      return;
+    }
+
+    if (!apiBaseUrl.trim() || !idToken.trim()) {
+      return;
+    }
+
+    if (rules) {
+      return;
+    }
+
+    void loadRules();
+  }, [activeView, apiBaseUrl, idToken, rules]);
+
   const onSubmit = async (): Promise<void> => {
     if (!selectedFile) {
       return;
@@ -62,7 +182,7 @@ export function App(): JSX.Element {
 
     try {
       const presign = await callApi<PresignResponse>(
-        apiBaseUrl,
+        normalizeApiBaseUrl(apiBaseUrl),
         "/uploads/presign",
         idToken,
         {
@@ -79,7 +199,7 @@ export function App(): JSX.Element {
       });
 
       const createJob = await callApi<CreateJobResponse>(
-        apiBaseUrl,
+        normalizeApiBaseUrl(apiBaseUrl),
         "/preflight/jobs",
         idToken,
         {
@@ -89,7 +209,7 @@ export function App(): JSX.Element {
       );
 
       setJobId(createJob.jobId);
-      const finalJob = await pollJob(apiBaseUrl, idToken, createJob.jobId);
+      const finalJob = await pollJob(normalizeApiBaseUrl(apiBaseUrl), idToken, createJob.jobId);
       setResult(finalJob);
     } catch (submitError) {
       setError((submitError as Error).message);
@@ -98,10 +218,127 @@ export function App(): JSX.Element {
     }
   };
 
+  const loadRules = async (): Promise<void> => {
+    setIsLoadingRules(true);
+    setRulesError("");
+
+    try {
+      const response = await callApiWithMethod<RulesResponse>(
+        normalizeApiBaseUrl(apiBaseUrl),
+        "/preflight/rules",
+        idToken,
+        "GET",
+      );
+      setRules(response.rules);
+      setRulesUpdatedAt(response.updatedAt);
+    } catch (loadError) {
+      setRulesError((loadError as Error).message);
+    } finally {
+      setIsLoadingRules(false);
+    }
+  };
+
+  const saveRules = async (): Promise<void> => {
+    if (!rules) {
+      return;
+    }
+
+    setIsSavingRules(true);
+    setRulesError("");
+
+    try {
+      const response = await callApiWithMethod<RulesResponse>(
+        normalizeApiBaseUrl(apiBaseUrl),
+        "/preflight/rules",
+        idToken,
+        "PUT",
+        {
+          rules,
+        },
+      );
+      setRules(response.rules);
+      setRulesUpdatedAt(response.updatedAt);
+    } catch (saveError) {
+      setRulesError((saveError as Error).message);
+    } finally {
+      setIsSavingRules(false);
+    }
+  };
+
+  const updateMinField = (
+    key:
+      | "minFileSizeBytes"
+      | "minWidthPx"
+      | "minHeightPx"
+      | "minDpi"
+      | "minTargetPrintDpi",
+    value: string,
+  ): void => {
+    const parsed = parseRequiredNonNegative(value);
+    if (parsed == null) {
+      return;
+    }
+
+    setRules((currentRules) => (currentRules ? { ...currentRules, [key]: parsed } : currentRules));
+  };
+
+  const updateMaxField = (
+    key: "maxFileSizeBytes" | "maxWidthPx" | "maxHeightPx" | "maxDpi" | "maxTargetPrintDpi",
+    value: string,
+  ): void => {
+    const parsed = parseOptionalNonNegative(value);
+    if (parsed === undefined) {
+      return;
+    }
+
+    setRules((currentRules) => (currentRules ? { ...currentRules, [key]: parsed } : currentRules));
+  };
+
+  const updateSeverityField = (
+    key:
+      | "fileSizeSeverity"
+      | "widthSeverity"
+      | "heightSeverity"
+      | "dpiSeverity"
+      | "targetPrintDpiSeverity"
+      | "mimeTypeSeverity"
+      | "mimeMatchSeverity"
+      | "pdfPageSizeSeverity",
+    value: RuleSeverity,
+  ): void => {
+    setRules((currentRules) => (currentRules ? { ...currentRules, [key]: value } : currentRules));
+  };
+
+  const updateOptionalInchesField = (
+    key: "targetPrintWidthIn" | "targetPrintHeightIn",
+    value: string,
+  ): void => {
+    const parsed = parseOptionalPositive(value);
+    if (parsed === undefined) {
+      return;
+    }
+
+    setRules((currentRules) => (currentRules ? { ...currentRules, [key]: parsed } : currentRules));
+  };
+
   return (
     <main className="layout">
       <section className="panel">
-        <h1>Preflight Uploader</h1>
+        <h1>Preflight App</h1>
+        <p>Configure preflight thresholds and run upload checks.</p>
+        <div>
+          <button onClick={() => setActiveView("upload")} disabled={activeView === "upload"}>
+            Upload
+          </button>
+          <button onClick={() => setActiveView("rules")} disabled={activeView === "rules"}>
+            Rules
+          </button>
+        </div>
+      </section>
+
+      {activeView === "upload" && (
+      <section className="panel">
+        <h2>Preflight Uploader</h2>
         <p>Upload a file, run backend preflight checks, and inspect metadata output.</p>
 
         <label>
@@ -135,6 +372,140 @@ export function App(): JSX.Element {
         {jobId && <p>Job: {jobId}</p>}
         {error && <p className="error">{error}</p>}
       </section>
+      )}
+
+      {activeView === "rules" && (
+        <section className="panel">
+          <h2>Rules</h2>
+          <p>Set min/max thresholds. Leave max blank for no max. Set min to 0 when needed.</p>
+
+          <button onClick={loadRules} disabled={isLoadingRules || !apiBaseUrl.trim() || !idToken.trim()}>
+            {isLoadingRules ? "Loading rules..." : "Load Rules"}
+          </button>
+
+          {rulesUpdatedAt && <p>Last updated: {new Date(rulesUpdatedAt).toLocaleString()}</p>}
+          {rulesError && <p className="error">{rulesError}</p>}
+
+          {rules && (
+            <>
+              <label>
+                Allowed MIME Types (comma-separated)
+                <input
+                  value={rules.allowedMimeTypes.join(",")}
+                  onChange={(event) => {
+                    const mimeTypes = event.target.value
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean);
+                    setRules((currentRules) =>
+                      currentRules
+                        ? {
+                            ...currentRules,
+                            allowedMimeTypes: mimeTypes,
+                          }
+                        : currentRules,
+                    );
+                  }}
+                />
+              </label>
+
+              {RULE_FIELD_ROWS.map((row) => (
+                <div key={row.label}>
+                  <h3>{row.label}</h3>
+                  <label>
+                    Min ({row.unit})
+                    <input
+                      value={String(rules[row.minKey])}
+                      onChange={(event) => updateMinField(row.minKey, event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Max ({row.unit}, blank for none)
+                    <input
+                      value={numberOrBlank(rules[row.maxKey])}
+                      onChange={(event) => updateMaxField(row.maxKey, event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Severity
+                    <select
+                      value={rules[row.severityKey]}
+                      onChange={(event) =>
+                        updateSeverityField(row.severityKey, event.target.value as RuleSeverity)
+                      }
+                    >
+                      <option value="FAIL">FAIL</option>
+                      <option value="WARN">WARN</option>
+                    </select>
+                  </label>
+                </div>
+              ))}
+
+              <div>
+                <h3>Target Print Size</h3>
+                <label>
+                  Width (in, blank disables target-print checks)
+                  <input
+                    value={numberOrBlank(rules.targetPrintWidthIn)}
+                    onChange={(event) => updateOptionalInchesField("targetPrintWidthIn", event.target.value)}
+                  />
+                </label>
+                <label>
+                  Height (in, blank disables target-print checks)
+                  <input
+                    value={numberOrBlank(rules.targetPrintHeightIn)}
+                    onChange={(event) => updateOptionalInchesField("targetPrintHeightIn", event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <h3>Non-Range Check Severities</h3>
+                <label>
+                  Allowed MIME Type
+                  <select
+                    value={rules.mimeTypeSeverity}
+                    onChange={(event) =>
+                      updateSeverityField("mimeTypeSeverity", event.target.value as RuleSeverity)
+                    }
+                  >
+                    <option value="FAIL">FAIL</option>
+                    <option value="WARN">WARN</option>
+                  </select>
+                </label>
+                <label>
+                  Uploaded MIME Matches Content
+                  <select
+                    value={rules.mimeMatchSeverity}
+                    onChange={(event) =>
+                      updateSeverityField("mimeMatchSeverity", event.target.value as RuleSeverity)
+                    }
+                  >
+                    <option value="FAIL">FAIL</option>
+                    <option value="WARN">WARN</option>
+                  </select>
+                </label>
+                <label>
+                  PDF Page Size Fits Target Print
+                  <select
+                    value={rules.pdfPageSizeSeverity}
+                    onChange={(event) =>
+                      updateSeverityField("pdfPageSizeSeverity", event.target.value as RuleSeverity)
+                    }
+                  >
+                    <option value="FAIL">FAIL</option>
+                    <option value="WARN">WARN</option>
+                  </select>
+                </label>
+              </div>
+
+              <button onClick={saveRules} disabled={isSavingRules}>
+                {isSavingRules ? "Saving rules..." : "Save Rules"}
+              </button>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="panel">
         <h2>Result</h2>
@@ -183,7 +554,7 @@ async function callApi<T>(
   idToken: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${idToken}`,
@@ -200,6 +571,80 @@ async function callApi<T>(
   return (await response.json()) as T;
 }
 
+async function callApiWithMethod<T>(
+  apiBaseUrl: string,
+  path: string,
+  idToken: string,
+  method: "GET" | "PUT",
+  body?: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new Error(`API request failed (${response.status}): ${responseBody}`);
+  }
+
+  return (await response.json()) as T;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeApiBaseUrl(apiBaseUrl: string): string {
+  return apiBaseUrl.trim().replace(/\/+$/, "");
+}
+
+function parseRequiredNonNegative(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseOptionalNonNegative(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function parseOptionalPositive(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function numberOrBlank(value: number | null): string {
+  return value == null ? "" : String(value);
 }

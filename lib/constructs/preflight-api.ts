@@ -10,6 +10,8 @@ export interface PreflightApiProps {
   presignFunction: IFunction;
   createJobFunction: IFunction;
   getJobFunction: IFunction;
+  getRulesFunction: IFunction;
+  updateRulesFunction: IFunction;
 }
 
 export class PreflightApi extends Construct {
@@ -22,7 +24,7 @@ export class PreflightApi extends Construct {
       apiName: "preflight-api",
       corsPreflight: {
         allowHeaders: ["authorization", "content-type"],
-        allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.POST],
+        allowMethods: [apigwv2.CorsHttpMethod.GET, apigwv2.CorsHttpMethod.POST, apigwv2.CorsHttpMethod.PUT],
         allowOrigins: props.corsAllowOrigins,
         maxAge: cdk.Duration.hours(1),
       },
@@ -46,6 +48,20 @@ export class PreflightApi extends Construct {
       path: "/preflight/jobs/{jobId}",
       methods: [apigwv2.HttpMethod.GET],
       integration: new HttpLambdaIntegration("GetJobIntegration", props.getJobFunction),
+      authorizer: props.authorizer,
+    });
+
+    this.httpApi.addRoutes({
+      path: "/preflight/rules",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: new HttpLambdaIntegration("GetRulesIntegration", props.getRulesFunction),
+      authorizer: props.authorizer,
+    });
+
+    this.httpApi.addRoutes({
+      path: "/preflight/rules",
+      methods: [apigwv2.HttpMethod.PUT],
+      integration: new HttpLambdaIntegration("UpdateRulesIntegration", props.updateRulesFunction),
       authorizer: props.authorizer,
     });
   }

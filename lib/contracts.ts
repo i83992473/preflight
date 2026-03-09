@@ -1,5 +1,6 @@
 export type JobStatus = "PENDING" | "RUNNING" | "PASSED" | "FAILED" | "ERROR";
 export type CheckSeverity = "FAIL" | "WARN" | "INFO";
+export type RuleSeverity = "FAIL" | "WARN";
 
 export interface PreflightCheckResult {
   code: string;
@@ -39,11 +40,25 @@ export interface ImageMetadata {
 
 export interface PreflightRules {
   allowedMimeTypes: string[];
-  maxFileSizeBytes: number;
+  minFileSizeBytes: number;
+  maxFileSizeBytes: number | null;
+  fileSizeSeverity: RuleSeverity;
   minWidthPx: number;
+  maxWidthPx: number | null;
+  widthSeverity: RuleSeverity;
   minHeightPx: number;
+  maxHeightPx: number | null;
+  heightSeverity: RuleSeverity;
   minDpi: number;
-  targetPrintWidthIn?: number;
-  targetPrintHeightIn?: number;
+  maxDpi: number | null;
+  dpiSeverity: RuleSeverity;
+  minTargetPrintDpi: number;
+  maxTargetPrintDpi: number | null;
+  targetPrintDpiSeverity: RuleSeverity;
+  targetPrintWidthIn: number | null;
+  targetPrintHeightIn: number | null;
+  pdfPageSizeSeverity: RuleSeverity;
+  mimeTypeSeverity: RuleSeverity;
+  mimeMatchSeverity: RuleSeverity;
   allowedColorSpaces?: string[];
 }

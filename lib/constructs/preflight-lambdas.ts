@@ -8,12 +8,14 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 import { Construct } from "constructs";
 import * as path from "path";
 import type { PreflightRules } from "../contracts";
+import { DEFAULT_PREFLIGHT_RULES, normalizePreflightRules } from "../preflight-rules";
 
 export interface PreflightLambdasProps {
   uploadsTempBucket: s3.IBucket;
   uploadsApprovedBucket: s3.IBucket;
   uploadsQuarantineBucket: s3.IBucket;
   jobsTable: dynamodb.ITable;
+  rulesTable: dynamodb.ITable;
   jobsQueue: sqs.IQueue;
   preflightRules?: Partial<PreflightRules>;
 }
@@ -22,24 +24,17 @@ export class PreflightLambdas extends Construct {
   public readonly presignFunction: NodejsFunction;
   public readonly createJobFunction: NodejsFunction;
   public readonly getJobFunction: NodejsFunction;
+  public readonly getRulesFunction: NodejsFunction;
+  public readonly updateRulesFunction: NodejsFunction;
   public readonly workerFunction: NodejsFunction;
 
   constructor(scope: Construct, id: string, props: PreflightLambdasProps) {
     super(scope, id);
 
-    const defaultPreflightRules: PreflightRules = {
-      allowedMimeTypes: ["image/jpeg", "image/png", "image/tiff", "application/pdf"],
-      maxFileSizeBytes: 26_214_400,
-      minWidthPx: 2000,
-      minHeightPx: 2000,
-      minDpi: 300,
-      targetPrintWidthIn: 8.5,
-      targetPrintHeightIn: 11,
-    };
-    const configuredPreflightRules: PreflightRules = {
-      ...defaultPreflightRules,
+    const configuredPreflightRules: PreflightRules = normalizePreflightRules({
+      ...DEFAULT_PREFLIGHT_RULES,
       ...(props.preflightRules ?? {}),
-    };
+    });
 
     const commonFunctionProps = {
       runtime: Runtime.NODEJS_20_X,
@@ -59,7 +54,11 @@ export class PreflightLambdas extends Construct {
         UPLOADS_TEMP_BUCKET: props.uploadsTempBucket.bucketName,
         PRESIGN_EXPIRES_SECONDS: "900",
         ALLOWED_MIME_TYPES: configuredPreflightRules.allowedMimeTypes.join(","),
-        MAX_FILE_SIZE_BYTES: String(configuredPreflightRules.maxFileSizeBytes),
+        MIN_FILE_SIZE_BYTES: String(configuredPreflightRules.minFileSizeBytes),
+        MAX_FILE_SIZE_BYTES:
+          configuredPreflightRules.maxFileSizeBytes == null
+            ? ""
+            : String(configuredPreflightRules.maxFileSizeBytes),
       },
     });
 
@@ -82,6 +81,24 @@ export class PreflightLambdas extends Construct {
       },
     });
 
+    this.getRulesFunction = new NodejsFunction(this, "GetRulesFunction", {
+      ...commonFunctionProps,
+      entry: path.join(__dirname, "../../lambda/get-rules.ts"),
+      handler: "handler",
+      environment: {
+        RULES_TABLE_NAME: props.rulesTable.tableName,
+      },
+    });
+
+    this.updateRulesFunction = new NodejsFunction(this, "UpdateRulesFunction", {
+      ...commonFunctionProps,
+      entry: path.join(__dirname, "../../lambda/update-rules.ts"),
+      handler: "handler",
+      environment: {
+        RULES_TABLE_NAME: props.rulesTable.tableName,
+      },
+    });
+
     this.workerFunction = new NodejsFunction(this, "WorkerFunction", {
       runtime: Runtime.NODEJS_20_X,
       timeout: Duration.minutes(2),
@@ -97,6 +114,9 @@ export class PreflightLambdas extends Construct {
         UPLOADS_TEMP_BUCKET: props.uploadsTempBucket.bucketName,
         UPLOADS_APPROVED_BUCKET: props.uploadsApprovedBucket.bucketName,
         UPLOADS_QUARANTINE_BUCKET: props.uploadsQuarantineBucket.bucketName,
+        RULES_TABLE_NAME: props.rulesTable.tableName,
+        RULES_PK: "RULES",
+        RULES_SK: "ACTIVE",
         PREFLIGHT_RULES_JSON: JSON.stringify(configuredPreflightRules),
         PDF_DEEP_MODE: "true",
       },
@@ -115,9 +135,12 @@ export class PreflightLambdas extends Construct {
     props.jobsQueue.grantSendMessages(this.createJobFunction);
 
     props.jobsTable.grantReadData(this.getJobFunction);
+    props.rulesTable.grantReadData(this.getRulesFunction);
+    props.rulesTable.grantReadWriteData(this.updateRulesFunction);
 
     props.jobsQueue.grantConsumeMessages(this.workerFunction);
     props.jobsTable.grantReadWriteData(this.workerFunction);
+    props.rulesTable.grantReadData(this.workerFunction);
     props.uploadsTempBucket.grantRead(this.workerFunction);
     props.uploadsTempBucket.grantDelete(this.workerFunction);
     props.uploadsApprovedBucket.grantWrite(this.workerFunction);

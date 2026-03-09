@@ -77,13 +77,14 @@ Current thresholds are passed to the worker Lambda as `PREFLIGHT_RULES_JSON`.
 
 Supported rule keys include:
 
-1. `minWidthPx`
-2. `minHeightPx`
-3. `minDpi`
-4. `targetPrintWidthIn`
-5. `targetPrintHeightIn`
-6. `maxFileSizeBytes`
-7. `allowedMimeTypes`
+1. `minFileSizeBytes`, `maxFileSizeBytes`, `fileSizeSeverity`
+2. `minWidthPx`, `maxWidthPx`, `widthSeverity`
+3. `minHeightPx`, `maxHeightPx`, `heightSeverity`
+4. `minDpi`, `maxDpi`, `dpiSeverity`
+5. `minTargetPrintDpi`, `maxTargetPrintDpi`, `targetPrintDpiSeverity`
+6. `targetPrintWidthIn`, `targetPrintHeightIn`
+7. `pdfPageSizeSeverity`, `mimeTypeSeverity`, `mimeMatchSeverity`
+8. `allowedMimeTypes`
 
 1. View active thresholds on a deployed stack:
 
@@ -97,13 +98,13 @@ aws lambda get-function-configuration \
 
 ```bash
 npx aws-cdk deploy \
-  -c preflightRules='{"allowedMimeTypes":["image/jpeg","image/png","image/tiff","application/pdf"],"maxFileSizeBytes":26214400,"minWidthPx":1200,"minHeightPx":1200,"minDpi":150,"targetPrintWidthIn":8.5,"targetPrintHeightIn":11}'
+  -c preflightRules='{"allowedMimeTypes":["image/jpeg","image/png","image/tiff","application/pdf"],"minFileSizeBytes":0,"maxFileSizeBytes":26214400,"fileSizeSeverity":"FAIL","minWidthPx":1200,"maxWidthPx":null,"widthSeverity":"FAIL","minHeightPx":1200,"maxHeightPx":null,"heightSeverity":"FAIL","minDpi":150,"maxDpi":null,"dpiSeverity":"WARN","minTargetPrintDpi":150,"maxTargetPrintDpi":null,"targetPrintDpiSeverity":"FAIL","targetPrintWidthIn":8.5,"targetPrintHeightIn":11,"pdfPageSizeSeverity":"FAIL","mimeTypeSeverity":"FAIL","mimeMatchSeverity":"FAIL"}'
 ```
 
 PowerShell example:
 
 ```powershell
-npx aws-cdk deploy -c preflightRules="{\"minWidthPx\":1200,\"minHeightPx\":1200,\"minDpi\":150,\"targetPrintWidthIn\":8.5,\"targetPrintHeightIn\":11}"
+npx aws-cdk deploy -c preflightRules="{\"minWidthPx\":1200,\"minHeightPx\":1200,\"minDpi\":150,\"minTargetPrintDpi\":150,\"targetPrintWidthIn\":8.5,\"targetPrintHeightIn\":11,\"dpiSeverity\":\"WARN\"}"
 ```
 
 3. Example: include frontend origin + rule override in one deploy command:
@@ -111,5 +112,5 @@ npx aws-cdk deploy -c preflightRules="{\"minWidthPx\":1200,\"minHeightPx\":1200,
 ```bash
 npx aws-cdk deploy \
   -c frontendOrigins=https://your-frontend-domain.com \
-  -c preflightRules='{"minWidthPx":1200,"minHeightPx":1200,"minDpi":150,"targetPrintWidthIn":8.5,"targetPrintHeightIn":11}'
+  -c preflightRules='{"minWidthPx":1200,"minHeightPx":1200,"minDpi":150,"minTargetPrintDpi":150,"targetPrintWidthIn":8.5,"targetPrintHeightIn":11}'
 ```

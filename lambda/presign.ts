@@ -37,8 +37,14 @@ export const handler = async (
     return json(400, { message: `mimeType ${mimeType} is not allowed` });
   }
 
-  const maxFileSizeBytes = Number(process.env.MAX_FILE_SIZE_BYTES ?? "26214400");
-  if (bytes > maxFileSizeBytes) {
+  const minFileSizeBytes = Number(process.env.MIN_FILE_SIZE_BYTES ?? "0");
+  if (bytes < minFileSizeBytes) {
+    return json(400, { message: `file size must be at least ${minFileSizeBytes} bytes` });
+  }
+
+  const rawMaxFileSizeBytes = process.env.MAX_FILE_SIZE_BYTES?.trim() ?? "";
+  const maxFileSizeBytes = rawMaxFileSizeBytes ? Number(rawMaxFileSizeBytes) : null;
+  if (maxFileSizeBytes != null && bytes > maxFileSizeBytes) {
     return json(400, { message: `file size exceeds ${maxFileSizeBytes} bytes` });
   }
 
