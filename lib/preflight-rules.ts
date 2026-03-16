@@ -1,29 +1,33 @@
 import type { PreflightRules, RuleSeverity } from "./contracts";
 
 const DEFAULT_ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/tiff", "application/pdf"];
+const DEFAULT_ALLOWED_COLOR_SPACES = ["RGB", "sRGB", "CMYK", "GRAY"];
 
 export const DEFAULT_PREFLIGHT_RULES: PreflightRules = {
+  skipPreflight: false,
   allowedMimeTypes: DEFAULT_ALLOWED_MIME_TYPES,
-  minFileSizeBytes: 0,
-  maxFileSizeBytes: 26_214_400,
+  minFileSizeBytes: 1024,
+  maxFileSizeBytes: 104_857_600,
   fileSizeSeverity: "FAIL",
-  minWidthPx: 2000,
+  minWidthPx: 200,
   maxWidthPx: null,
   widthSeverity: "FAIL",
-  minHeightPx: 2000,
+  minHeightPx: 200,
   maxHeightPx: null,
   heightSeverity: "FAIL",
-  minDpi: 300,
+  minDpi: 72,
   maxDpi: null,
   dpiSeverity: "WARN",
-  minTargetPrintDpi: 300,
+  minTargetPrintDpi: 150,
   maxTargetPrintDpi: null,
-  targetPrintDpiSeverity: "FAIL",
+  targetPrintDpiSeverity: "WARN",
   targetPrintWidthIn: 8.5,
   targetPrintHeightIn: 11,
-  pdfPageSizeSeverity: "FAIL",
+  pdfPageSizeSeverity: "WARN",
   mimeTypeSeverity: "FAIL",
-  mimeMatchSeverity: "FAIL",
+  mimeMatchSeverity: "WARN",
+  allowedColorSpaces: DEFAULT_ALLOWED_COLOR_SPACES,
+  colorSpaceSeverity: "WARN",
 };
 
 export function normalizePreflightRules(rawRules: unknown): PreflightRules {
@@ -33,6 +37,7 @@ export function normalizePreflightRules(rawRules: unknown): PreflightRules {
   const legacyMaxFileSizeBytes = asNumber(input.maxFileSizeBytes);
 
   const normalizedRules: PreflightRules = {
+    skipPreflight: input.skipPreflight === true,
     allowedMimeTypes: normalizeMimeTypes(input.allowedMimeTypes),
     minFileSizeBytes: nonNegative(asNumber(input.minFileSizeBytes), DEFAULT_PREFLIGHT_RULES.minFileSizeBytes),
     maxFileSizeBytes: nullableNonNegative(
@@ -76,6 +81,8 @@ export function normalizePreflightRules(rawRules: unknown): PreflightRules {
     ),
     mimeTypeSeverity: normalizeSeverity(input.mimeTypeSeverity, DEFAULT_PREFLIGHT_RULES.mimeTypeSeverity),
     mimeMatchSeverity: normalizeSeverity(input.mimeMatchSeverity, DEFAULT_PREFLIGHT_RULES.mimeMatchSeverity),
+    allowedColorSpaces: normalizeColorSpaces(input.allowedColorSpaces),
+    colorSpaceSeverity: normalizeSeverity(input.colorSpaceSeverity, DEFAULT_PREFLIGHT_RULES.colorSpaceSeverity),
   };
 
   if (
@@ -116,6 +123,17 @@ function normalizeMimeTypes(rawValue: unknown): string[] {
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter(Boolean);
   return mimeTypes.length > 0 ? mimeTypes : DEFAULT_ALLOWED_MIME_TYPES;
+}
+
+function normalizeColorSpaces(rawValue: unknown): string[] {
+  if (!Array.isArray(rawValue)) {
+    return DEFAULT_ALLOWED_COLOR_SPACES;
+  }
+
+  const colorSpaces = rawValue
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+  return colorSpaces.length > 0 ? colorSpaces : DEFAULT_ALLOWED_COLOR_SPACES;
 }
 
 function normalizeSeverity(rawSeverity: unknown, fallback: RuleSeverity): RuleSeverity {

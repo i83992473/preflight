@@ -2,6 +2,7 @@
   "app": "npx ts-node --prefer-ts-exts bin/app.ts",
   "context": {
     "environment": "dev",
-    "frontendOrigins": ["http://localhost:5173"]
+    "frontendOrigins": ["*"],
+    "apiKey": "pfk-1cc504c9efc84809b1c77b37e165ece2e3c7c4f5e3ce4d24"
   }
 }

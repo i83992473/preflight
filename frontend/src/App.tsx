@@ -20,6 +20,7 @@ type JobResponse = {
 type RuleSeverity = "FAIL" | "WARN";
 
 type PreflightRules = {
+  skipPreflight: boolean;
   allowedMimeTypes: string[];
   minFileSizeBytes: number;
   maxFileSizeBytes: number | null;
@@ -41,6 +42,8 @@ type PreflightRules = {
   pdfPageSizeSeverity: RuleSeverity;
   mimeTypeSeverity: RuleSeverity;
   mimeMatchSeverity: RuleSeverity;
+  allowedColorSpaces: string[];
+  colorSpaceSeverity: RuleSeverity;
 };
 
 type RulesResponse = {
@@ -51,27 +54,30 @@ type RulesResponse = {
 };
 
 const DEFAULT_RULES: PreflightRules = {
+  skipPreflight: false,
   allowedMimeTypes: ["image/jpeg", "image/png", "image/tiff", "application/pdf"],
-  minFileSizeBytes: 0,
-  maxFileSizeBytes: 26214400,
+  minFileSizeBytes: 1024,
+  maxFileSizeBytes: 104857600,
   fileSizeSeverity: "FAIL",
-  minWidthPx: 2000,
+  minWidthPx: 200,
   maxWidthPx: null,
   widthSeverity: "FAIL",
-  minHeightPx: 2000,
+  minHeightPx: 200,
   maxHeightPx: null,
   heightSeverity: "FAIL",
-  minDpi: 300,
+  minDpi: 72,
   maxDpi: null,
   dpiSeverity: "WARN",
-  minTargetPrintDpi: 300,
+  minTargetPrintDpi: 150,
   maxTargetPrintDpi: null,
-  targetPrintDpiSeverity: "FAIL",
+  targetPrintDpiSeverity: "WARN",
   targetPrintWidthIn: 8.5,
   targetPrintHeightIn: 11,
-  pdfPageSizeSeverity: "FAIL",
+  pdfPageSizeSeverity: "WARN",
   mimeTypeSeverity: "FAIL",
-  mimeMatchSeverity: "FAIL",
+  mimeMatchSeverity: "WARN",
+  allowedColorSpaces: ["RGB", "sRGB", "CMYK", "GRAY"],
+  colorSpaceSeverity: "WARN",
 };
 
 const BYTES_PER_MB = 1_048_576;
@@ -85,6 +91,13 @@ const MIME_TYPE_OPTIONS = [
   { value: "image/bmp", label: "BMP" },
   { value: "image/svg+xml", label: "SVG" },
   { value: "application/pdf", label: "PDF" },
+];
+
+const COLOR_SPACE_OPTIONS = [
+  { value: "RGB", label: "RGB" },
+  { value: "sRGB", label: "sRGB" },
+  { value: "CMYK", label: "CMYK" },
+  { value: "GRAY", label: "Grayscale" },
 ];
 
 const TERMINAL_STATES = new Set(["PASSED", "FAILED", "ERROR"]);
@@ -366,7 +379,8 @@ export function App(): JSX.Element {
       | "targetPrintDpiSeverity"
       | "mimeTypeSeverity"
       | "mimeMatchSeverity"
-      | "pdfPageSizeSeverity",
+      | "pdfPageSizeSeverity"
+      | "colorSpaceSeverity",
     value: RuleSeverity,
   ): void => {
     setRules((currentRules) => ({ ...currentRules, [key]: value }));
@@ -480,6 +494,20 @@ export function App(): JSX.Element {
           {rulesError && <p className="error">{rulesError}</p>}
 
           <div>
+            <h3>Skip Preflight</h3>
+            <label>
+              <input
+                type="checkbox"
+                checked={rules.skipPreflight}
+                onChange={(event) =>
+                  setRules((currentRules) => ({ ...currentRules, skipPreflight: event.target.checked }))
+                }
+              />
+              Skip all preflight checks (auto-approve every upload)
+            </label>
+          </div>
+
+          <div>
             <h3>Allowed MIME Types</h3>
             <label>
               <input
@@ -513,6 +541,55 @@ export function App(): JSX.Element {
                 {opt.label} ({opt.value})
               </label>
             ))}
+          </div>
+
+          <div>
+            <h3>Allowed Color Spaces</h3>
+            <p>Applies to images only (JPEG, PNG, TIFF). PDFs are not checked.</p>
+            <label>
+              <input
+                type="checkbox"
+                checked={COLOR_SPACE_OPTIONS.every((opt) => rules.allowedColorSpaces.includes(opt.value))}
+                onChange={(event) => {
+                  setRules((currentRules) => ({
+                    ...currentRules,
+                    allowedColorSpaces: event.target.checked
+                      ? COLOR_SPACE_OPTIONS.map((opt) => opt.value)
+                      : [],
+                  }));
+                }}
+              />
+              Select All
+            </label>
+            {COLOR_SPACE_OPTIONS.map((opt) => (
+              <label key={opt.value}>
+                <input
+                  type="checkbox"
+                  checked={rules.allowedColorSpaces.includes(opt.value)}
+                  onChange={(event) => {
+                    setRules((currentRules) => ({
+                      ...currentRules,
+                      allowedColorSpaces: event.target.checked
+                        ? [...currentRules.allowedColorSpaces, opt.value]
+                        : currentRules.allowedColorSpaces.filter((c) => c !== opt.value),
+                    }));
+                  }}
+                />
+                {opt.label}
+              </label>
+            ))}
+            <label>
+              Severity
+              <select
+                value={rules.colorSpaceSeverity}
+                onChange={(event) =>
+                  updateSeverityField("colorSpaceSeverity", event.target.value as RuleSeverity)
+                }
+              >
+                <option value="FAIL">FAIL</option>
+                <option value="WARN">WARN</option>
+              </select>
+            </label>
           </div>
 
           <div>

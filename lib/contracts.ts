@@ -39,6 +39,7 @@ export interface ImageMetadata {
 }
 
 export interface PreflightRules {
+  skipPreflight: boolean;
   allowedMimeTypes: string[];
   minFileSizeBytes: number;
   maxFileSizeBytes: number | null;
@@ -60,5 +61,6 @@ export interface PreflightRules {
   pdfPageSizeSeverity: RuleSeverity;
   mimeTypeSeverity: RuleSeverity;
   mimeMatchSeverity: RuleSeverity;
-  allowedColorSpaces?: string[];
+  allowedColorSpaces: string[];
+  colorSpaceSeverity: RuleSeverity;
 }

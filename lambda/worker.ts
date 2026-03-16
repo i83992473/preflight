@@ -62,6 +62,59 @@ export const handler = async (event: SQSEvent): Promise<void> => {
       : loadFallbackRules();
 
     try {
+      if (rules.skipPreflight) {
+        const destinationKey = `approved/${objectKey.split("/").pop()}`;
+
+        await s3.send(
+          new CopyObjectCommand({
+            Bucket: approvedBucket,
+            Key: destinationKey,
+            CopySource: `${tempBucket}/${objectKey}`,
+          }),
+        );
+
+        await s3.send(
+          new DeleteObjectCommand({
+            Bucket: tempBucket,
+            Key: objectKey,
+          }),
+        );
+
+        const now = new Date().toISOString();
+        const skippedCheck: PreflightCheckResult = {
+          code: "PREFLIGHT_SKIPPED",
+          severity: "INFO",
+          passed: true,
+          message: "Preflight checks were skipped per rules configuration",
+          actual: "skipped",
+          expected: "skipped",
+        };
+
+        await ddb.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: key,
+            UpdateExpression:
+              "SET #status = :status, updatedAt = :updatedAt, checks = :checks, summary = :summary, destinationBucket = :destinationBucket, destinationKey = :destinationKey, GSI1PK = :gsiPk, GSI1SK = :gsiSk",
+            ExpressionAttributeNames: {
+              "#status": "status",
+            },
+            ExpressionAttributeValues: {
+              ":status": "PASSED",
+              ":updatedAt": now,
+              ":checks": [skippedCheck],
+              ":summary": { passCount: 1, warnCount: 0, failCount: 0 },
+              ":destinationBucket": approvedBucket,
+              ":destinationKey": destinationKey,
+              ":gsiPk": "STATUS#PASSED",
+              ":gsiSk": `${now}#${jobId}`,
+            },
+          }),
+        );
+
+        continue;
+      }
+
       const objectHead = await s3.send(
         new HeadObjectCommand({
           Bucket: tempBucket,
@@ -250,6 +303,17 @@ function buildChecks(input: {
       message: "Uploaded MIME type must match file content signature",
       actual: `${input.mimeType} (uploaded), ${detectedMimeType} (detected)`,
       expected: "uploaded MIME and detected MIME should match",
+    });
+  }
+
+  if (input.metadata.colorSpace != null) {
+    checks.push({
+      code: "ALLOWED_COLOR_SPACE",
+      severity: input.rules.colorSpaceSeverity,
+      passed: input.rules.allowedColorSpaces.includes(input.metadata.colorSpace),
+      message: "File color space must be allowed",
+      actual: input.metadata.colorSpace,
+      expected: input.rules.allowedColorSpaces.join(","),
     });
   }
 
