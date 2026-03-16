@@ -30,7 +30,6 @@ export const handler = async (event: SQSEvent): Promise<void> => {
   const tempBucket = process.env.UPLOADS_TEMP_BUCKET;
   const approvedBucket = process.env.UPLOADS_APPROVED_BUCKET;
   const quarantineBucket = process.env.UPLOADS_QUARANTINE_BUCKET;
-  const rules = await loadActiveRules();
   const pdfDeepMode = process.env.PDF_DEEP_MODE === "true";
 
   if (!tableName || !tempBucket || !approvedBucket || !quarantineBucket) {
@@ -56,6 +55,11 @@ export const handler = async (event: SQSEvent): Promise<void> => {
     }
 
     const objectKey = job.Item.objectKey as string;
+    const tenantId = (job.Item.tenantId as string) ?? null;
+    const productId = (job.Item.productId as string) ?? null;
+    const rules = tenantId
+      ? await loadTenantRules(tenantId, productId)
+      : loadFallbackRules();
 
     try {
       const objectHead = await s3.send(
@@ -160,33 +164,47 @@ async function markStatus(
   );
 }
 
-async function loadActiveRules(): Promise<PreflightRules> {
-  const rulesTableName = process.env.RULES_TABLE_NAME;
-  const rulesPartitionKey = process.env.RULES_PK ?? "RULES";
-  const rulesSortKey = process.env.RULES_SK ?? "ACTIVE";
-
-  if (!rulesTableName) {
-    return parseFallbackRules(process.env.PREFLIGHT_RULES_JSON);
+async function loadTenantRules(tenantId: string, productId: string | null): Promise<PreflightRules> {
+  const rulesBucket = process.env.RULES_BUCKET;
+  if (!rulesBucket) {
+    return loadFallbackRules();
   }
 
-  try {
-    const response = await ddb.send(
-      new GetCommand({
-        TableName: rulesTableName,
-        Key: {
-          PK: rulesPartitionKey,
-          SK: rulesSortKey,
-        },
-      }),
-    );
+  // Resolution order:
+  // 1. rules/{tenantId}/{productId}.json  (if productId provided)
+  // 2. rules/{tenantId}/default.json      (tenant default)
+  // 3. PREFLIGHT_RULES_JSON env var / hardcoded defaults
 
-    if (response.Item?.rules) {
-      return normalizePreflightRules(response.Item.rules);
+  const keysToTry: string[] = [];
+  if (productId) {
+    keysToTry.push(`rules/${tenantId}/${productId}.json`);
+  }
+  keysToTry.push(`rules/${tenantId}/default.json`);
+
+  for (const key of keysToTry) {
+    try {
+      const result = await s3.send(
+        new GetObjectCommand({
+          Bucket: rulesBucket,
+          Key: key,
+        }),
+      );
+
+      const body = await result.Body?.transformToString();
+      if (body) {
+        return normalizePreflightRules(JSON.parse(body));
+      }
+    } catch (error) {
+      if ((error as { name?: string }).name !== "NoSuchKey") {
+        throw error;
+      }
     }
-  } catch {
-    // Fall back to Lambda environment defaults when rules-table fetch fails.
   }
 
+  return loadFallbackRules();
+}
+
+function loadFallbackRules(): PreflightRules {
   return parseFallbackRules(process.env.PREFLIGHT_RULES_JSON);
 }
 

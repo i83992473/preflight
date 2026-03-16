@@ -14,8 +14,8 @@ export interface PreflightLambdasProps {
   uploadsTempBucket: s3.IBucket;
   uploadsApprovedBucket: s3.IBucket;
   uploadsQuarantineBucket: s3.IBucket;
+  rulesBucket: s3.IBucket;
   jobsTable: dynamodb.ITable;
-  rulesTable: dynamodb.ITable;
   jobsQueue: sqs.IQueue;
   preflightRules?: Partial<PreflightRules>;
 }
@@ -25,7 +25,7 @@ export class PreflightLambdas extends Construct {
   public readonly createJobFunction: NodejsFunction;
   public readonly getJobFunction: NodejsFunction;
   public readonly getRulesFunction: NodejsFunction;
-  public readonly updateRulesFunction: NodejsFunction;
+  public readonly saveRulesFunction: NodejsFunction;
   public readonly workerFunction: NodejsFunction;
 
   constructor(scope: Construct, id: string, props: PreflightLambdasProps) {
@@ -86,16 +86,16 @@ export class PreflightLambdas extends Construct {
       entry: path.join(__dirname, "../../lambda/get-rules.ts"),
       handler: "handler",
       environment: {
-        RULES_TABLE_NAME: props.rulesTable.tableName,
+        RULES_BUCKET: props.rulesBucket.bucketName,
       },
     });
 
-    this.updateRulesFunction = new NodejsFunction(this, "UpdateRulesFunction", {
+    this.saveRulesFunction = new NodejsFunction(this, "SaveRulesFunction", {
       ...commonFunctionProps,
-      entry: path.join(__dirname, "../../lambda/update-rules.ts"),
+      entry: path.join(__dirname, "../../lambda/save-rules.ts"),
       handler: "handler",
       environment: {
-        RULES_TABLE_NAME: props.rulesTable.tableName,
+        RULES_BUCKET: props.rulesBucket.bucketName,
       },
     });
 
@@ -114,9 +114,7 @@ export class PreflightLambdas extends Construct {
         UPLOADS_TEMP_BUCKET: props.uploadsTempBucket.bucketName,
         UPLOADS_APPROVED_BUCKET: props.uploadsApprovedBucket.bucketName,
         UPLOADS_QUARANTINE_BUCKET: props.uploadsQuarantineBucket.bucketName,
-        RULES_TABLE_NAME: props.rulesTable.tableName,
-        RULES_PK: "RULES",
-        RULES_SK: "ACTIVE",
+        RULES_BUCKET: props.rulesBucket.bucketName,
         PREFLIGHT_RULES_JSON: JSON.stringify(configuredPreflightRules),
         PDF_DEEP_MODE: "true",
       },
@@ -135,12 +133,13 @@ export class PreflightLambdas extends Construct {
     props.jobsQueue.grantSendMessages(this.createJobFunction);
 
     props.jobsTable.grantReadData(this.getJobFunction);
-    props.rulesTable.grantReadData(this.getRulesFunction);
-    props.rulesTable.grantReadWriteData(this.updateRulesFunction);
+
+    props.rulesBucket.grantRead(this.getRulesFunction);
+    props.rulesBucket.grantReadWrite(this.saveRulesFunction);
 
     props.jobsQueue.grantConsumeMessages(this.workerFunction);
     props.jobsTable.grantReadWriteData(this.workerFunction);
-    props.rulesTable.grantReadData(this.workerFunction);
+    props.rulesBucket.grantRead(this.workerFunction);
     props.uploadsTempBucket.grantRead(this.workerFunction);
     props.uploadsTempBucket.grantDelete(this.workerFunction);
     props.uploadsApprovedBucket.grantWrite(this.workerFunction);

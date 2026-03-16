@@ -15,7 +15,7 @@ const frontendOrigins =
           .split(",")
           .map((value: string) => value.trim())
           .filter(Boolean)
-      : ["http://localhost:5173"];
+      : ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"];
 const preflightRules = parsePreflightRules(app.node.tryGetContext("preflightRules"));
 
 const env: cdk.Environment = {
@@ -37,8 +37,8 @@ new PreflightApiStack(app, `PreflightApi-${environment}`, {
   uploadsTempBucket: storage.uploadsTempBucket,
   uploadsApprovedBucket: storage.uploadsApprovedBucket,
   uploadsQuarantineBucket: storage.uploadsQuarantineBucket,
+  rulesBucket: storage.rulesBucket,
   jobsTable: storage.jobsTable,
-  rulesTable: storage.rulesTable,
   jobsQueue: storage.jobsQueue,
 });
 

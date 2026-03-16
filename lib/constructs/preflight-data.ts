@@ -3,7 +3,6 @@ import { Construct } from "constructs";
 
 export class PreflightData extends Construct {
   public readonly jobsTable: dynamodb.Table;
-  public readonly rulesTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string) {
     super(scope, id);
@@ -23,16 +22,6 @@ export class PreflightData extends Construct {
       indexName: "GSI1",
       partitionKey: { name: "GSI1PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "GSI1SK", type: dynamodb.AttributeType.STRING },
-    });
-
-    this.rulesTable = new dynamodb.Table(this, "PreflightRulesTable", {
-      partitionKey: { name: "PK", type: dynamodb.AttributeType.STRING },
-      sortKey: { name: "SK", type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecoverySpecification: {
-        pointInTimeRecoveryEnabled: true,
-      },
-      deletionProtection: true,
     });
   }
 }

@@ -16,8 +16,8 @@ export class PreflightStorageStack extends cdk.Stack {
   public readonly uploadsTempBucket: s3.Bucket;
   public readonly uploadsApprovedBucket: s3.Bucket;
   public readonly uploadsQuarantineBucket: s3.Bucket;
+  public readonly rulesBucket: s3.Bucket;
   public readonly jobsTable: dynamodb.Table;
-  public readonly rulesTable: dynamodb.Table;
   public readonly jobsQueue: sqs.Queue;
 
   constructor(scope: Construct, id: string, props: PreflightStorageStackProps) {
@@ -36,8 +36,8 @@ export class PreflightStorageStack extends cdk.Stack {
     this.uploadsTempBucket = buckets.uploadsTempBucket;
     this.uploadsApprovedBucket = buckets.uploadsApprovedBucket;
     this.uploadsQuarantineBucket = buckets.uploadsQuarantineBucket;
+    this.rulesBucket = buckets.rulesBucket;
     this.jobsTable = data.jobsTable;
-    this.rulesTable = data.rulesTable;
     this.jobsQueue = queue.jobsQueue;
 
     new cdk.CfnOutput(this, "UploadsTempBucketName", {
@@ -56,8 +56,8 @@ export class PreflightStorageStack extends cdk.Stack {
       value: this.jobsTable.tableName,
     });
 
-    new cdk.CfnOutput(this, "RulesTableName", {
-      value: this.rulesTable.tableName,
+    new cdk.CfnOutput(this, "RulesBucketName", {
+      value: this.rulesBucket.bucketName,
     });
 
     new cdk.CfnOutput(this, "JobsQueueName", {

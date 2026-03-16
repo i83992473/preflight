@@ -1,4 +1,4 @@
-import { Duration, RemovalPolicy } from "aws-cdk-lib";
+import { Duration, RemovalPolicy, Stack } from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
 
@@ -13,9 +13,12 @@ export class PreflightBuckets extends Construct {
   public readonly uploadsTempBucket: s3.Bucket;
   public readonly uploadsApprovedBucket: s3.Bucket;
   public readonly uploadsQuarantineBucket: s3.Bucket;
+  public readonly rulesBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: PreflightBucketsProps) {
     super(scope, id);
+
+    const account = Stack.of(this).account;
 
     const commonConfig: Partial<s3.BucketProps> = {
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -27,7 +30,7 @@ export class PreflightBuckets extends Construct {
 
     this.uploadsTempBucket = new s3.Bucket(this, "UploadsTempBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-temp-${props.environment}`,
+      bucketName: `preflight-uploads-temp-${props.environment}-${account}`,
       cors: [
         {
           allowedMethods: [s3.HttpMethods.PUT],
@@ -46,17 +49,22 @@ export class PreflightBuckets extends Construct {
 
     this.uploadsApprovedBucket = new s3.Bucket(this, "UploadsApprovedBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-approved-${props.environment}`,
+      bucketName: `preflight-uploads-approved-${props.environment}-${account}`,
     });
 
     this.uploadsQuarantineBucket = new s3.Bucket(this, "UploadsQuarantineBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-quarantine-${props.environment}`,
+      bucketName: `preflight-uploads-quarantine-${props.environment}-${account}`,
       lifecycleRules: [
         {
           expiration: Duration.days(props.quarantineRetentionDays ?? 30),
         },
       ],
+    });
+
+    this.rulesBucket = new s3.Bucket(this, "RulesBucket", {
+      ...commonConfig,
+      bucketName: `preflight-rules-${props.environment}-${account}`,
     });
   }
 }
