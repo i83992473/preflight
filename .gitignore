@@ -9,3 +9,5 @@ frontend/.env
 
 .DS_Store
 Thumbs.db
+
+errors.txt
