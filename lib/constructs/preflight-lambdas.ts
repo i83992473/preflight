@@ -26,6 +26,8 @@ export class PreflightLambdas extends Construct {
   public readonly getJobFunction: NodejsFunction;
   public readonly getRulesFunction: NodejsFunction;
   public readonly saveRulesFunction: NodejsFunction;
+  public readonly deleteRulesFunction: NodejsFunction;
+  public readonly getResetDefaultsFunction: NodejsFunction;
   public readonly workerFunction: NodejsFunction;
 
   constructor(scope: Construct, id: string, props: PreflightLambdasProps) {
@@ -90,9 +92,24 @@ export class PreflightLambdas extends Construct {
       },
     });
 
+    this.getResetDefaultsFunction = new NodejsFunction(this, "GetResetDefaultsFunction", {
+      ...commonFunctionProps,
+      entry: path.join(__dirname, "../../lambda/get-reset-defaults.ts"),
+      handler: "handler",
+    });
+
     this.saveRulesFunction = new NodejsFunction(this, "SaveRulesFunction", {
       ...commonFunctionProps,
       entry: path.join(__dirname, "../../lambda/save-rules.ts"),
+      handler: "handler",
+      environment: {
+        RULES_BUCKET: props.rulesBucket.bucketName,
+      },
+    });
+
+    this.deleteRulesFunction = new NodejsFunction(this, "DeleteRulesFunction", {
+      ...commonFunctionProps,
+      entry: path.join(__dirname, "../../lambda/delete-rules.ts"),
       handler: "handler",
       environment: {
         RULES_BUCKET: props.rulesBucket.bucketName,
@@ -136,6 +153,7 @@ export class PreflightLambdas extends Construct {
 
     props.rulesBucket.grantRead(this.getRulesFunction);
     props.rulesBucket.grantReadWrite(this.saveRulesFunction);
+    props.rulesBucket.grantDelete(this.deleteRulesFunction);
 
     props.jobsQueue.grantConsumeMessages(this.workerFunction);
     props.jobsTable.grantReadWriteData(this.workerFunction);

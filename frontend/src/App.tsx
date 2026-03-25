@@ -53,28 +53,28 @@ type RulesResponse = {
   source?: string;
 };
 
-const DEFAULT_RULES: PreflightRules = {
+const FALLBACK_RESET_RULES: PreflightRules = {
   skipPreflight: false,
   allowedMimeTypes: ["image/jpeg", "image/png", "image/tiff", "application/pdf"],
   minFileSizeBytes: 1024,
   maxFileSizeBytes: 104857600,
-  fileSizeSeverity: "FAIL",
-  minWidthPx: 200,
+  fileSizeSeverity: "WARN",
+  minWidthPx: 20,
   maxWidthPx: null,
-  widthSeverity: "FAIL",
-  minHeightPx: 200,
+  widthSeverity: "WARN",
+  minHeightPx: 20,
   maxHeightPx: null,
-  heightSeverity: "FAIL",
+  heightSeverity: "WARN",
   minDpi: 72,
   maxDpi: null,
   dpiSeverity: "WARN",
-  minTargetPrintDpi: 150,
+  minTargetPrintDpi: 72,
   maxTargetPrintDpi: null,
   targetPrintDpiSeverity: "WARN",
-  targetPrintWidthIn: 8.5,
-  targetPrintHeightIn: 11,
+  targetPrintWidthIn: 4.13,
+  targetPrintHeightIn: 5.83,
   pdfPageSizeSeverity: "WARN",
-  mimeTypeSeverity: "FAIL",
+  mimeTypeSeverity: "WARN",
   mimeMatchSeverity: "WARN",
   allowedColorSpaces: ["RGB", "sRGB", "CMYK", "GRAY"],
   colorSpaceSeverity: "WARN",
@@ -182,10 +182,11 @@ export function App(): JSX.Element {
   const [jobId, setJobId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [rules, setRules] = useState<PreflightRules>(DEFAULT_RULES);
+  const [rules, setRules] = useState<PreflightRules>(FALLBACK_RESET_RULES);
   const [rulesError, setRulesError] = useState("");
   const [isLoadingRules, setIsLoadingRules] = useState(false);
   const [isSavingRules, setIsSavingRules] = useState(false);
+  const [isDeletingRules, setIsDeletingRules] = useState(false);
   const [rulesLoaded, setRulesLoaded] = useState(false);
 
   const ready = useMemo(
@@ -239,6 +240,33 @@ export function App(): JSX.Element {
     setJobId("");
 
     try {
+      // If a tenant is specified, fetch their rules and short-circuit when possible:
+      // - skipPreflight: skip the upload entirely and return an immediate result
+      // - MIME type check: reject before uploading to S3
+      if (tenantId.trim()) {
+        const rulesPath = productId.trim()
+          ? `/preflight/rules/${encodeURIComponent(tenantId.trim())}/${encodeURIComponent(productId.trim())}`
+          : `/preflight/rules/${encodeURIComponent(tenantId.trim())}`;
+        const tenantRules = await apiGet<RulesResponse>(baseUrl, rulesPath, headers);
+
+        if (tenantRules.rules.skipPreflight) {
+          setResult({
+            status: "PASSED",
+            checks: [{ code: "PREFLIGHT_SKIPPED", severity: "INFO", passed: true, message: "Preflight checks were skipped per rules configuration" }],
+          });
+          return;
+        }
+
+        if (
+          tenantRules.rules.allowedMimeTypes.length > 0 &&
+          !tenantRules.rules.allowedMimeTypes.includes(selectedFile.type)
+        ) {
+          throw new Error(
+            `File type "${selectedFile.type}" is not allowed for this tenant. Allowed: ${tenantRules.rules.allowedMimeTypes.join(", ")}`,
+          );
+        }
+      }
+
       const presign = await apiPost<PresignResponse>(baseUrl, "/uploads/presign", headers, {
         fileName: selectedFile.name,
         mimeType: selectedFile.type,
@@ -336,8 +364,44 @@ export function App(): JSX.Element {
     }
   };
 
-  const resetRules = (): void => {
-    setRules(DEFAULT_RULES);
+  const deleteRules = async (): Promise<void> => {
+    if (!tenantId.trim()) {
+      setRulesError("Tenant ID is required");
+      return;
+    }
+
+    const target = productId.trim()
+      ? `product "${productId.trim()}" under tenant "${tenantId.trim()}"`
+      : `tenant "${tenantId.trim()}"`;
+    if (!window.confirm(`Delete rules for ${target}? This cannot be undone.`)) {
+      return;
+    }
+
+    setIsDeletingRules(true);
+    setRulesError("");
+
+    try {
+      const rulesPath = productId.trim()
+        ? `/preflight/rules/${encodeURIComponent(tenantId.trim())}/${encodeURIComponent(productId.trim())}`
+        : `/preflight/rules/${encodeURIComponent(tenantId.trim())}`;
+      await apiDelete(baseUrl, rulesPath, headers);
+      setRulesLoaded(false);
+      setRules(FALLBACK_RESET_RULES);
+    } catch (deleteError) {
+      setRulesError((deleteError as Error).message);
+    } finally {
+      setIsDeletingRules(false);
+    }
+  };
+
+  const resetRules = async (): Promise<void> => {
+    setRulesError("");
+    try {
+      const response = await apiGet<{ rules: PreflightRules }>(baseUrl, "/preflight/rules/defaults", headers);
+      setRules(response.rules);
+    } catch {
+      setRules(FALLBACK_RESET_RULES);
+    }
     setRulesLoaded(false);
   };
 
@@ -486,6 +550,9 @@ export function App(): JSX.Element {
             </button>{" "}
             <button onClick={saveRules} disabled={isSavingRules || !apiBaseUrl.trim() || !apiKey.trim() || !tenantId.trim()}>
               {isSavingRules ? "Saving..." : "Save Rules"}
+            </button>{" "}
+            <button onClick={deleteRules} disabled={isDeletingRules || !apiBaseUrl.trim() || !apiKey.trim() || !tenantId.trim()}>
+              {isDeletingRules ? "Deleting..." : "Delete Rules"}
             </button>{" "}
             <button onClick={resetRules}>Reset to Defaults</button>
           </div>
@@ -771,6 +838,18 @@ async function apiGet<T>(baseUrl: string, path: string, headers: ApiHeaders): Pr
   }
 
   return (await response.json()) as T;
+}
+
+async function apiDelete(baseUrl: string, path: string, headers: ApiHeaders): Promise<void> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`API request failed (${response.status}): ${text}`);
+  }
 }
 
 async function apiPut<T>(baseUrl: string, path: string, headers: ApiHeaders, body: unknown): Promise<T> {

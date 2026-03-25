@@ -110,6 +110,8 @@ export class PreflightApiStack extends cdk.Stack {
       getJobFunction: lambdas.getJobFunction,
       getRulesFunction: lambdas.getRulesFunction,
       saveRulesFunction: lambdas.saveRulesFunction,
+      deleteRulesFunction: lambdas.deleteRulesFunction,
+      getResetDefaultsFunction: lambdas.getResetDefaultsFunction,
     });
 
     new cdk.CfnOutput(this, "PreflightApiUrl", {

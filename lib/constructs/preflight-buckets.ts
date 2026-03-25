@@ -30,7 +30,7 @@ export class PreflightBuckets extends Construct {
 
     this.uploadsTempBucket = new s3.Bucket(this, "UploadsTempBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-temp-${props.environment}-${account}`,
+      bucketName: `preflight-uploads-temp-${props.environment}`,
       cors: [
         {
           allowedMethods: [s3.HttpMethods.PUT],
@@ -49,12 +49,12 @@ export class PreflightBuckets extends Construct {
 
     this.uploadsApprovedBucket = new s3.Bucket(this, "UploadsApprovedBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-approved-${props.environment}-${account}`,
+      bucketName: `preflight-uploads-approved-${props.environment}`,
     });
 
     this.uploadsQuarantineBucket = new s3.Bucket(this, "UploadsQuarantineBucket", {
       ...commonConfig,
-      bucketName: `preflight-uploads-quarantine-${props.environment}-${account}`,
+      bucketName: `preflight-uploads-quarantine-${props.environment}`,
       lifecycleRules: [
         {
           expiration: Duration.days(props.quarantineRetentionDays ?? 30),
